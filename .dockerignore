@@ -1,0 +1,17 @@
+.git
+.gitignore
+.vscode
+.idea
+__pycache__
+*.pyc
+*.pyo
+*.log
+*.bak
+*.backup
+build/
+devel/
+.catkin_workspace
+mission_test/
+README.md
+Dockerfile
+.dockerignore
