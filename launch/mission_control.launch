@@ -1,0 +1,68 @@
+<launch>
+    <!-- ================================================================= -->
+    <!-- USV Mission Control - Launch file principale                      -->
+    <!-- ================================================================= -->
+
+    <!-- === Parametri configurabili === -->
+
+    <!-- Path base missioni: conterra' mission_todo/, mission_done/, logs/ -->
+    <arg name="mission_dir" default="$(env HOME)/missions"/>
+
+    <!-- Identificativo veicolo -->
+    <arg name="drone_id" default="1"/>
+
+    <!-- Modalita' debug (log verbosi) -->
+    <arg name="debug" default="false"/>
+
+    <!-- Conversione coordinate: true = waypoint GPX in lat/lon (richiede navsat_transform_node) -->
+    <!--                         false = waypoint gia' in frame map (per test) -->
+    <arg name="use_gps_waypoints" default="false"/>
+
+    <!-- Coordinate docking (formato dipende da use_gps_waypoints) -->
+    <arg name="docking_target_x" default="0.0"/>
+    <arg name="docking_target_y" default="0.0"/>
+
+    <!-- Frame di riferimento -->
+    <arg name="frame_map" default="map"/>
+    <arg name="frame_utm" default="utm"/>
+    <arg name="frame_base" default="base_link"/>
+
+    <!-- === Caricamento parametri di tuning da YAML === -->
+    <!-- I parametri vengono caricati nei namespace dei nodi corrispondenti -->
+    <rosparam file="$(find edge_mission_controller)/config/tuning_params.yaml" command="load"/>
+
+    <!-- === Configura directory log ROS === -->
+    <env name="ROS_LOG_DIR" value="$(arg mission_dir)/logs"/>
+
+    <!-- ================================================================= -->
+    <!-- Nodi                                                              -->
+    <!-- ================================================================= -->
+
+    <!-- Mission Controller (logica principale FSM) -->
+    <node name="mission_controller" pkg="edge_mission_controller" type="mission_controller.py"
+          output="screen" respawn="false">
+        <param name="mission_dir" value="$(arg mission_dir)"/>
+        <param name="drone_id" type="int" value="$(arg drone_id)"/>
+        <param name="debug" type="bool" value="$(arg debug)"/>
+        <param name="use_gps_waypoints" type="bool" value="$(arg use_gps_waypoints)"/>
+        <param name="docking_target_x" type="double" value="$(arg docking_target_x)"/>
+        <param name="docking_target_y" type="double" value="$(arg docking_target_y)"/>
+        <param name="frame_map" value="$(arg frame_map)"/>
+        <param name="frame_utm" value="$(arg frame_utm)"/>
+        <param name="frame_base" value="$(arg frame_base)"/>
+        <env name="ROSCONSOLE_CONFIG_FILE"
+             value="$(find edge_mission_controller)/config/rosconsole.config"/>
+    </node>
+
+    <!-- Watchdog (monitora heartbeat mission_controller) -->
+    <node name="mission_watchdog" pkg="edge_mission_controller" type="watchdog.py"
+          output="screen" respawn="true"/>
+
+    <!-- NOTA: usv_diagnostic e mission_ext_interface NON sono nodi          -->
+    <!-- standalone. Vengono importati come classi da mission_controller.py -->
+    <!-- (UsvDiagnostic e MissionExtInterface).                             -->
+    <!-- I loro parametri di tuning sono nel YAML sotto i namespace         -->
+    <!-- /usv_diagnostic/ e /mission_ext_interface/ e vengono letti         -->
+    <!-- con rospy.get_param() dal codice con path assoluti.                -->
+
+</launch>

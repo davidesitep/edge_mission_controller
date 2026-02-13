@@ -1,0 +1,41 @@
+# =============================================================================
+# USV Mission Control - Parametri di tuning
+# =============================================================================
+# Questo file contiene timeout, soglie e parametri di tuning per tutti i nodi.
+# I parametri vengono caricati nel namespace privato di ciascun nodo dal launch file.
+# Per modificare il comportamento del sistema, editare i valori qui sotto
+# senza toccare il codice sorgente.
+# =============================================================================
+
+# --- Mission Controller ---
+mission_controller:
+  # Timeout (secondi)
+  cmd_vel_timeout: 30           # Senza comandi velocita' -> torna in idle (stato 3)
+  inactivity_timeout: 900       # Inattivita' globale prima di avviare docking (15 min)
+  mb_server_timeout: 5          # Attesa connessione a move_base per tentativo
+  pending_timeout: 120          # Goal in PENDING prima di re-invio
+  rostimeout: 600               # Attesa roscore al boot (10 min)
+
+  # Contatori e tentativi
+  max_mbs_retry: 3              # Tentativi connessione move_base prima di fallire
+  max_docking_retries: 3        # Tentativi docking prima di arrendersi
+
+# --- Watchdog ---
+mission_watchdog:
+  timeout: 15.0                 # Secondi senza heartbeat -> allarme
+  rate: 2.0                     # Periodo di controllo in secondi (0.5 Hz)
+  max_restarts: 3               # Tentativi di riavvio mission_controller
+  recovery_cooldown: 20.0       # Attesa dopo un tentativo di recovery
+
+# --- Diagnostic ---
+usv_diagnostic:
+  motor_check_interval: 10.0    # Secondi tra i check motore
+  motor_fail_threshold: 3       # Rilevamenti consecutivi per dichiarare guasto
+  min_displacement: 2.0         # Metri minimi di spostamento atteso
+  min_heading_change: 3.0       # Gradi minimi di rotazione attesa
+  drift_angle_threshold: 90.0   # Gradi di scarto per rilevare deriva
+
+# --- Mission External Interface ---
+mission_ext_interface:
+  mean_sample: 5                # Campioni per media mobile SOG/COG
+  usv_mean_vel: 1.02            # Velocita' media USV in m/s (per stime ETA)
