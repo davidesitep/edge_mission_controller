@@ -7,7 +7,6 @@
 
 FROM ros:noetic-ros-base
 
-# Evita prompt interattivi durante l'installazione
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ---------- Dipendenze di sistema e pacchetti ROS ----------
@@ -41,30 +40,19 @@ ENV CATKIN_WS=/catkin_ws
 RUN mkdir -p ${CATKIN_WS}/src
 WORKDIR ${CATKIN_WS}
 
-# ---- Pacchetti custom esterni (drone_sim, custom_msgs) ----
-# Questi pacchetti forniscono messaggi usati dal codice:
-#   - drone_sim      -> Telemetry.msg  (usato da mission_ext_interface.py)
-#   - custom_msgs    -> SystemStatus.msg (usato da diagnostic.py)
-#
-# OPZIONE A: se i pacchetti sono in repository git, decommentare e adattare:
-# RUN git clone https://<repo>/drone_sim.git      ${CATKIN_WS}/src/drone_sim
-# RUN git clone https://<repo>/custom_msgs.git    ${CATKIN_WS}/src/custom_msgs
-#
-# OPZIONE B: copiare le cartelle dal contesto di build:
-# COPY drone_sim/    ${CATKIN_WS}/src/drone_sim/
-# COPY custom_msgs/  ${CATKIN_WS}/src/custom_msgs/
-#
-# OPZIONE C: se i pacchetti sono gia' installati nell'immagine base o
-#            disponibili come .deb, aggiungerli sopra nella sezione apt.
+# Copia sorgenti
+COPY ./drone_sim/              ${CATKIN_WS}/src/drone_sim/
+COPY ./custom_msgs/            ${CATKIN_WS}/src/custom_msgs/
+COPY ./edge_mission_controller/ ${CATKIN_WS}/src/edge_mission_controller/
 
-# ---- Copia del pacchetto edge_mission_controller ----
-COPY . ${CATKIN_WS}/src/edge_mission_controller/
-
-# ---- Build ----
+# Build
 SHELL ["/bin/bash", "-c"]
 RUN source /opt/ros/noetic/setup.bash && \
     cd ${CATKIN_WS} && \
     catkin_make -DCMAKE_BUILD_TYPE=Release
+
+# Rimuovi gli artifact di build (non servono a runtime)
+RUN rm -rf ${CATKIN_WS}/build
 
 # ---------- Directory missioni (volume a runtime) ----------
 RUN mkdir -p /home/usv/missions/mission_todo \
@@ -76,4 +64,4 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["roslaunch", "edge_mission_controller", "mission_control.launch"]
+CMD ["roslaunch", "--wait", "edge_mission_controller", "mission_control.launch"]
