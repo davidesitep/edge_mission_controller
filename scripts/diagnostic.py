@@ -184,16 +184,16 @@ class UsvDiagnostic:
 
     def imu_callback(self, msg):
         """Valuta lo stato della IMU."""
-        if not msg.status.imu_com:
+        if not msg.imu_status.imu_com:
             self._diagnostic_stato_imu = 0  # Nessuna comunicazione
-        elif not msg.status.imu_status:
+        elif not msg.imu_status.imu_status:
             self._diagnostic_stato_imu = 1  # Non calibrata (scarso)
-        elif (not msg.status.imu_accels_in_range
-              and not msg.status.imu_gyros_in_range):
+        elif (not msg.imu_status.imu_accels_in_range
+              and not msg.imu_status.imu_gyros_in_range):
             self._diagnostic_stato_imu = 4  # Entrambe fuori range
-        elif not msg.status.imu_accels_in_range:
+        elif not msg.imu_status.imu_accels_in_range:
             self._diagnostic_stato_imu = 2  # Accelerazione lineare fuori range
-        elif not msg.status.imu_gyros_in_range:
+        elif not msg.imu_status.imu_gyros_in_range:
             self._diagnostic_stato_imu = 3  # Accelerazione angolare fuori range
         else:
             self._diagnostic_stato_imu = 5  # IMU OK
