@@ -1,0 +1,17 @@
+services:
+  edge_mission_controller:
+    build: .
+    image: edge_mission_controller:latest
+    environment:
+      # Obbligatorio: fallisce subito con messaggio chiaro se mancante
+      ROS_MASTER_URI: ${ROS_MASTER_URI:?Imposta ROS_MASTER_URI nel file .env}
+      # Opzionali: uno dei due deve essere impostato per la comunicazione ROS
+      ROS_IP: ${ROS_IP:-}
+      ROS_HOSTNAME: ${ROS_HOSTNAME:-}
+      MISSION_DIR: ${MISSION_DIR:-/home/usv/missions}
+    volumes:
+      - ${MISSION_DIR:-/home/usv/missions}:/home/usv/missions
+    # Host networking necessario per raggiungere il roscore e mantenere
+    # la visibilità ROS bidirezionale tra container e host
+    network_mode: host
+    restart: unless-stopped
