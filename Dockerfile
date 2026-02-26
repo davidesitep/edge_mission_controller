@@ -42,22 +42,27 @@ WORKDIR ${CATKIN_WS}
 
 # Copia sorgenti
 COPY ./drone_sim/              ${CATKIN_WS}/src/drone_sim/
-COPY ./custom_msgs/            ${CATKIN_WS}/src/custom_msgs/
+COPY ./drone_msgs/            ${CATKIN_WS}/src/drone_msgs/
 COPY ./edge_mission_controller/ ${CATKIN_WS}/src/edge_mission_controller/
+COPY ./custom_msgs/		${CATKIN_WS}/src/custom_msgs
 
 # Build
 SHELL ["/bin/bash", "-c"]
 RUN source /opt/ros/noetic/setup.bash && \
     cd ${CATKIN_WS} && \
     catkin_make -DCMAKE_BUILD_TYPE=Release
+    
 
 # Rimuovi gli artifact di build (non servono a runtime)
-RUN rm -rf ${CATKIN_WS}/build
+# RUN rm -rf ${CATKIN_WS}/build
 
 # ---------- Directory missioni (volume a runtime) ----------
 RUN mkdir -p /home/usv/missions/mission_todo \
              /home/usv/missions/mission_done \
              /home/usv/missions/logs
+             
+RUN echo "source /opt/ros/noetic/setup.bash" >> ~/.bashrc && \
+    echo "source /catkin_ws/devel/setup.bash" >> ~/.bashrc       
 
 # ---------- Entrypoint ----------
 COPY entrypoint.sh /entrypoint.sh

@@ -12,7 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   sbg_driver
   std_msgs
-  message_generation
+  drone_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -49,12 +49,12 @@ find_package(catkin REQUIRED COMPONENTS
 ##   * add every package in MSG_DEP_SET to generate_messages(DEPENDENCIES ...)
 
 ## Generate messages in the 'msg' folder
-add_message_files(
-   FILES
-   Telemetry.msg
-   MPB.msg
-   FLOUR.msg
-)
+# add_message_files(
+#   FILES
+#   Telemetry.msg
+#   MPB.msg
+#   FLOUR.msg
+#)
 
 ## Generate services in the 'srv' folder
 # add_service_files(
@@ -71,10 +71,10 @@ add_message_files(
 # )
 
 ## Generate added messages and services with any dependencies listed here
- generate_messages(
-   DEPENDENCIES
-   std_msgs
-)
+# generate_messages(
+#   DEPENDENCIES
+#   std_msgs
+#)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -105,12 +105,12 @@ add_message_files(
 ## LIBRARIES: libraries you create in this project that dependent projects also need
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
-catkin_package(
+catkin_package()
 #  INCLUDE_DIRS include
 #  LIBRARIES edge_mission_controller
 #  CATKIN_DEPENDS geometry_msgs message_generation rospy std_msgs
 #  DEPENDS system_lib
-)
+#)
 
 ###########
 ## Build ##
@@ -146,7 +146,7 @@ include_directories(
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above
-# add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(${catkin_EXPORTED_TARGETS} drone_msgs_generate_messages_py)
 
 ## Specify libraries to link a library or executable target against
 # target_link_libraries(${PROJECT_NAME}_node

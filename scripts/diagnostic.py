@@ -20,7 +20,6 @@ from geometry_msgs.msg import Twist
 from sbg_driver.msg import (
     SbgEkfEuler,
     SbgEkfNav,
-    SbgGpsHdt,
     SbgGpsPos,
     SbgGpsVel,
     SbgImuData,
@@ -103,9 +102,8 @@ class UsvDiagnostic:
         self._diagnostic_stato_imu = None
         self._diagnostic_stato_ekf = None
         self._diagnostic_stato_gpsvel = None
-        self._diagnostic_stato_gpshdt = None
+
         self._diagnostic_stato_mag = None
-        self._diagnostic_stato_shipm = None
         self._diagnostic_stato_generale = None
         self._diagnostic_stato_motore = None
         self.status = SystemStatusStruct()
@@ -246,13 +244,6 @@ class UsvDiagnostic:
         self._diagnostic_stato_gpsvel = vel_type_map.get(
             msg.status.vel_type, 1
         )
-
-    def gps_hdt_callback(self, msg):
-        """Valuta lo stato del GPS heading (HDT)."""
-        if msg.status == 0:
-            self._diagnostic_stato_gpshdt = 0  # Soluzione calcolata
-        else:
-            self._diagnostic_stato_gpshdt = 1  # Errore interno
 
     def mag_callback(self, msg):
         """Valuta lo stato del magnetometro."""
@@ -485,5 +476,21 @@ class UsvDiagnostic:
 
         # Verifica stato motore (indipendente dai sensori)
         self.check_motor_status()
+
+        # Pubblica stato diagnostico su /usv_status_monitor/diagnostic/status
+        status_msg = SystemStatus()
+        status_msg.sensor_presence = self.status.sensor_presence
+        status_msg.imu_presence = self.status.imu_presence
+        status_msg.gps_presence = self.status.gps_presence
+        status_msg.is_gpspos = self.status.is_gpspos
+        status_msg.gps_type = self.status.gps_type or 0
+        status_msg.is_gpsvel = self.status.is_gpsvel
+        status_msg.gps_vel_type = self.status.gps_vel_type or 0
+        status_msg.is_gps_hdt = self.status.is_gps_hdt
+        status_msg.is_magnetometer = self.status.is_magnetometer
+        status_msg.is_imu = self.status.is_imu
+        status_msg.ekf_status = self.status.ekf_status or 0
+        status_msg.is_motor_ok = self.status.is_motor_ok
+        self.status_pub.publish(status_msg)
 
         return self.status

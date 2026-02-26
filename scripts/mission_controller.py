@@ -24,7 +24,6 @@ sys.path.append(script_dir)
 
 import random
 import time
-from collections import deque
 from typing import NamedTuple
 
 # --- Third-party / ROS ---
@@ -46,7 +45,7 @@ from move_base_msgs.msg import (
 from nav_msgs.srv import GetPlan
 from rosgraph import Master, MasterException
 from sensor_msgs.msg import NavSatFix
-from std_msgs.msg import Bool, Header, Int32, String
+from std_msgs.msg import Bool, Header, String
 
 # --- Moduli locali ---
 from diagnostic import UsvDiagnostic
@@ -59,7 +58,7 @@ from utility.usv_logger import USVLogger
 
 # --- Costanti (valori di default, sovrascritte da parametri ROS in __init__) ---
 DEBUG = False
-MISSION_BASE_PATH = "/home/usv/missions"
+MISSION_BASE_PATH = os.path.join(os.path.expanduser("~"), "missions")
 MISSION_TODO_PATH = os.path.join(MISSION_BASE_PATH, "mission_todo")
 MISSION_DONE_PATH = os.path.join(MISSION_BASE_PATH, "mission_done")
 LOG_PATH = os.path.join(MISSION_BASE_PATH, "logs")
@@ -162,7 +161,6 @@ class MissionController:
         self.navigation_status = MAPPA_MOVE_BASE_STATUS[-1]  # UNKNOWN
         self.move_base_client = None
         self.mission_index = 0
-        self.preemption_counter = 0
         self.new_mission_id = None
         self.current_mission_file = None  # Path reale del file GPX caricato
         self.errori_minori = []
@@ -180,8 +178,6 @@ class MissionController:
         self.lunghezza_segmenti = []
         self.prev_stamp = time.time()
         self.durata_missione = 0.0
-        self.prev_pos = (0.0, 0.0)
-        self.vel_media = deque(maxlen=10)
 
         # Variabili di stato
         self.is_valid_mission = False
@@ -196,9 +192,7 @@ class MissionController:
         self.minor_error = False
         self.major_error = False
         self.startup_retry_count = 0  # Contatore tentativi connessione in stato 1
-        self.system_status = None
         self.current_position = None
-        self.current_heading = None
         self._perf_counter = 0
 
         # Inizializzazione nodo ROS (deve precedere publishers/subscribers/tf)
@@ -218,7 +212,7 @@ class MissionController:
 
         # Publishers
         self.pub_status = rospy.Publisher(
-            '/usv_status', Int32, queue_size=10
+            f'/drone{DRONE_ID}/custom_topic_status', String, queue_size=10
         )
         self.pub_vel_cmd = rospy.Publisher(
             '/cmd_vel', Twist, queue_size=10
@@ -396,11 +390,6 @@ class MissionController:
             self.last_cmd_vel_time_move_base = rospy.get_time()
             if self.usv_status in (MAPPA_DEGLI_STATI_USV[2], MAPPA_DEGLI_STATI_USV[6]):
                 self.pub_vel_cmd.publish(msg_twist)
-
-    def usv_status_callback(self, msg):
-        """Callback per lo stato di move_base."""
-        if msg.header.stamp:
-            self.planner_active = True
 
     def usv_feedback_callback(self, msg):
         """Callback per il feedback di navigazione (non implementato)."""
@@ -586,7 +575,7 @@ class MissionController:
         # Rimuovi il file corrotto
         try:
             os.remove(mission_path)
-            self.logger.log_mission(
+            self.logger.log_warning(
                 f"Missione '{corrupted_id}' corrotta, "
                 f"file GPX rimosso da mission_todo/"
             )
@@ -699,9 +688,11 @@ class MissionController:
                         f"File missione {self.current_mission_file} rimosso "
                         f"(status: {mission_status})."
                     )
-                    self.logger.log_mission(
-                        f"Missione {self.new_mission_id} conclusa ({mission_status}), "
-                        f"file GPX rimosso da mission_todo/"
+                    self.logger.log_mission_end(
+                        mission_id=self.new_mission_id,
+                        status=mission_status,
+                        waypoints_reached=mission.waypoint_reached,
+                        duration_sec=mission.mission_duration
                     )
                     self.current_mission_file = None
                 except Exception as e:
@@ -759,30 +750,6 @@ class MissionController:
                 tf2_ros.ExtrapolationException):
             rospy.logwarn("Trasformazione map->base_link non disponibile.")
             return None
-
-    def get_usv_pos_global(self, x_map, y_map):
-        """Converte coordinate map in WGS84 lat/long.
-
-        Args:
-            x_map: coordinata X nel frame map.
-            y_map: coordinata Y nel frame map.
-
-        Returns:
-            Tupla (lat, long).
-
-        Note:
-            Richiede self.origin (coordinate UTM dell'origine del frame map)
-            che deve essere impostato dalla trasformata navsat_transform_node.
-        """
-        # TODO: self.origin deve essere calcolato dalla TF utm->map
-        zone_number = 32
-        zone_letter = 'T'
-
-        x_utm = x_map + self.origin[0]
-        y_utm = y_map + self.origin[1]
-
-        lat, lon = utm.to_latlon(x_utm, y_utm, zone_number, zone_letter)
-        return lat, lon
 
     # ------------ GEOMETRIA E NAVIGAZIONE ------------
 
@@ -1096,7 +1063,7 @@ class MissionController:
             self.can_jump = False
 
             # Diagnostica
-            self.system_status = self.usv_diagnostic.get_usv_status()
+            self.usv_diagnostic.get_usv_status()
             self.check_system_status()
             self.minor_error = self.sensor_error or self.planner_error
 
@@ -1107,9 +1074,9 @@ class MissionController:
             pose = self.get_usv_pose()
             if pose:
                 self.current_position = pose[:2]
-                self.gnd_station_if.pub_telemetry(
-                    self.usv_status, pose[:2]
-                )
+            self.gnd_station_if.pub_telemetry(
+                self.usv_status, self.current_position
+            )
 
             # --- Logging ---
             if old_status != self.usv_status:
@@ -1190,7 +1157,7 @@ class MissionController:
                     "Timeout inattivita' superato. Passaggio a docking."
                 )
                 self.jump_to_state(6)
-                self.pub_status.publish(0)
+                self.pub_status.publish(MAPPA_DEGLI_STATI_USV[0])
                 return
 
         if self.is_remote_control and self.autonomous_nav_failed:
@@ -1228,7 +1195,7 @@ class MissionController:
                 self.is_valid_mission = False
                 rospy.loginfo("Nessuna missione trovata.")
 
-        self.pub_status.publish(0)
+        self.pub_status.publish(MAPPA_DEGLI_STATI_USV[0])
 
     def _check_mission_history(self):
         """Verifica se la missione caricata e' gia' stata eseguita o fallita."""
@@ -1280,7 +1247,7 @@ class MissionController:
             rospy.loginfo("Passaggio in modalita' controllo remoto.")
             self.startup_retry_count = 0  # Reset contatore
             self.jump_to_state(3)
-            self.pub_status.publish(1)
+            self.pub_status.publish(MAPPA_DEGLI_STATI_USV[1])
             return
 
         if all(self.nav_system_active):
@@ -1299,12 +1266,12 @@ class MissionController:
                 self.is_valid_mission = False
                 self.planner_error = True
                 self.jump_to_state(4)
-                self.pub_status.publish(1)
+                self.pub_status.publish(MAPPA_DEGLI_STATI_USV[1])
                 return
 
             self.save_mission_info("iniziata")
             self.jump_to_state(2)
-            self.pub_status.publish(1)
+            self.pub_status.publish(MAPPA_DEGLI_STATI_USV[1])
             return
 
         # Verifica se abbiamo superato il numero massimo di tentativi globali
@@ -1325,7 +1292,7 @@ class MissionController:
             self.is_remote_control = True
             self.autonomous_nav_failed = True
             self.jump_to_state(7)  # Attesa comando remoto
-            self.pub_status.publish(1)
+            self.pub_status.publish(MAPPA_DEGLI_STATI_USV[1])
             return
 
         if not self.nav_system_active[0] and self.minor_error:
@@ -1337,7 +1304,7 @@ class MissionController:
             else:
                 self.jump_to_state(0)
                 rospy.logwarn("Condizione anomala. Ritorno in idle.")
-            self.pub_status.publish(1)
+            self.pub_status.publish(MAPPA_DEGLI_STATI_USV[1])
             return
 
         if not self.nav_system_active[1] and self.minor_error:
@@ -1349,7 +1316,7 @@ class MissionController:
             else:
                 self.jump_to_state(0)
                 rospy.logwarn("Condizione anomala. Ritorno in idle.")
-            self.pub_status.publish(1)
+            self.pub_status.publish(MAPPA_DEGLI_STATI_USV[1])
             return
 
         # Connessione a move_base
@@ -1401,7 +1368,7 @@ class MissionController:
                 f"{self.startup_retry_count}/{MAX_MBS_RETRY_CNT}"
             )
 
-        self.pub_status.publish(1)
+        self.pub_status.publish(MAPPA_DEGLI_STATI_USV[1])
 
     # ------------ STATO 2: NAVIGAZIONE AUTONOMA ------------
 
@@ -1431,7 +1398,7 @@ class MissionController:
             )
             self.planner_error = True
             self.jump_to_state(4)
-            self.pub_status.publish(2)
+            self.pub_status.publish(MAPPA_DEGLI_STATI_USV[2])
             return
 
         if self.is_remote_control:
@@ -1451,7 +1418,7 @@ class MissionController:
         else:
             self._execute_navigation()
 
-        self.pub_status.publish(2)
+        self.pub_status.publish(MAPPA_DEGLI_STATI_USV[2])
 
     def _execute_navigation(self):
         """Logica interna di navigazione: invio waypoint e gestione status."""
@@ -1605,7 +1572,7 @@ class MissionController:
             self._try_connect_move_base()
             self.last_cmd_vel_time = None
             self.jump_to_state(0)
-            self.pub_status.publish(3)
+            self.pub_status.publish(MAPPA_DEGLI_STATI_USV[3])
             return
 
         if self.last_cmd_vel_time is None:
@@ -1619,7 +1586,7 @@ class MissionController:
                 self.is_remote_control = False
                 self.pub_vel_cmd.publish(Twist())
 
-        self.pub_status.publish(3)
+        self.pub_status.publish(MAPPA_DEGLI_STATI_USV[3])
 
     # ------------ STATO 4: ERRORE MINORE ------------
 
@@ -1687,7 +1654,7 @@ class MissionController:
                 self.sensor_error = False
                 self.planner_error = False
 
-        self.pub_status.publish(4)
+        self.pub_status.publish(MAPPA_DEGLI_STATI_USV[4])
 
     # ------------ STATO 5: ERRORE CRITICO ------------
 
@@ -1709,7 +1676,7 @@ class MissionController:
         elif not self.major_error:
             self.jump_to_state(0)
 
-        self.pub_status.publish(5)
+        self.pub_status.publish(MAPPA_DEGLI_STATI_USV[5])
 
     # ------------ STATO 6: DOCKING ------------
 
@@ -1728,7 +1695,7 @@ class MissionController:
             self.pub_abort_current_goal.publish(GoalID())
             self.docking_goal_sent = False
             self.jump_to_state(3)
-            self.pub_status.publish(6)
+            self.pub_status.publish(MAPPA_DEGLI_STATI_USV[6])
             return
 
         if self.move_base_client is None:
@@ -1739,7 +1706,7 @@ class MissionController:
             self.docking_goal_sent = False
             self.docking_completed = True  # Evita loop idle-docking
             self.jump_to_state(0)
-            self.pub_status.publish(6)
+            self.pub_status.publish(MAPPA_DEGLI_STATI_USV[6])
             return
 
         if not self._check_tf_available():
@@ -1751,7 +1718,7 @@ class MissionController:
             self.is_remote_control = True
             self.autonomous_nav_failed = True
             self.jump_to_state(7)
-            self.pub_status.publish(6)
+            self.pub_status.publish(MAPPA_DEGLI_STATI_USV[6])
             return
 
         # Invio goal solo la prima volta
@@ -1767,7 +1734,7 @@ class MissionController:
         else:
             self._handle_docking_status()
 
-        self.pub_status.publish(6)
+        self.pub_status.publish(MAPPA_DEGLI_STATI_USV[6])
 
     def _handle_docking_status(self):
         """Gestisce le risposte di move_base durante il docking."""
@@ -1874,7 +1841,7 @@ class MissionController:
                         self.autonomous_nav_failed = False
                         self.docking_completed = False
                         self.jump_to_state(1)
-                        self.pub_status.publish(7)
+                        self.pub_status.publish(MAPPA_DEGLI_STATI_USV[7])
                         return
 
         # Operatore rimuove is_remote_control -> torna in idle
@@ -1886,10 +1853,10 @@ class MissionController:
                 else time.time()
             )
             self.jump_to_state(0)
-            self.pub_status.publish(7)
+            self.pub_status.publish(MAPPA_DEGLI_STATI_USV[7])
             return
 
-        self.pub_status.publish(7)
+        self.pub_status.publish(MAPPA_DEGLI_STATI_USV[7])
 
 
 # =============================================================================

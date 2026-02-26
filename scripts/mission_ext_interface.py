@@ -20,7 +20,7 @@ from collections import deque
 
 import gpxpy
 import rospy
-from drone_sim.msg import Telemetry
+from drone_msgs.msg import Telemetry
 from geometry_msgs.msg import Twist
 from sbg_driver.msg import SbgGpsPos
 from std_msgs.msg import Bool, Int32, String, Float32
@@ -86,10 +86,10 @@ class MissionExtInterface:
         self.cc_cmd_vel = Twist()
         self.is_remote_control = False
         self.last_cmd_vel_time = None
-        self.distance_to_goal = 0.0
-        self.distance_to_finish = 0.0
         self.current_lat = 0.0
         self.current_lon = 0.0
+        self.distance_to_goal = 0.0
+        self.distance_to_finish = 0.0
 
         # Subscribers
         self.sub_cc_cmd_vel = rospy.Subscriber(
@@ -109,9 +109,7 @@ class MissionExtInterface:
         self.pub_telemetry_data = rospy.Publisher(
             f'/drone{drone_id}/telemetry', Telemetry, queue_size=10
         )
-        self.pub_status = rospy.Publisher(
-            f'/drone{drone_id}/custom_topic_status', String, queue_size=10
-        )
+        # Nota: /drone{id}/custom_topic_status e' pubblicato da mission_controller
         self.pub_drone_id = rospy.Publisher(
             f'/drone{drone_id}/custom_topic_drone_id', Int32, queue_size=10,
             latch=True
@@ -177,12 +175,17 @@ class MissionExtInterface:
 
     # ------------ TELEMETRIA ------------
 
-    def pub_telemetry(self, usv_status, now_pos):
-        """Calcola e pubblica i dati di telemetria (SOG, COG, stato, GPS).
+    def pub_telemetry(self, usv_status, now_pos=None):
+        """Calcola e pubblica i dati di telemetria (SOG, COG, GPS).
+
+        Se now_pos e' None (TF non disponibile), heading e velocity vengono
+        pubblicati come -1 per indicare dato non calcolabile.
+        lat/lon vengono sempre pubblicati dal subscriber /sbg/gps_pos.
 
         Args:
             usv_status: stato corrente dell'USV (stringa).
-            now_pos: posizione corrente come tupla (x, y) in coordinate cartesiane.
+            now_pos: posizione corrente come tupla (x, y) in coordinate
+                     cartesiane, oppure None se TF non disponibile.
         """
         now_stamp = time.time()
         delta_time = now_stamp - self.prev_stamp
@@ -192,13 +195,17 @@ class MissionExtInterface:
         else:
             self.elapsed_time = 0.0
 
-        # Calcola SOG e COG solo se la posizione precedente e' disponibile
-        if self.prev_pos is not None:
-            # Usa coordinate cartesiane per il calcolo dell'heading
-            self.get_mean_hdg_cart(self.prev_pos, now_pos)
-            self.get_mean_vel(self.prev_pos, now_pos, delta_time)
+        if now_pos is not None:
+            # Calcola SOG e COG solo se la posizione precedente e' disponibile
+            if self.prev_pos is not None:
+                self.get_mean_hdg_cart(self.prev_pos, now_pos)
+                self.get_mean_vel(self.prev_pos, now_pos, delta_time)
+            self.prev_pos = now_pos
+        else:
+            # TF non disponibile: heading e velocity non calcolabili
+            self.mean_hdg = -1.0
+            self.mean_vel = -1.0
 
-        self.prev_pos = now_pos
         self.prev_stamp = now_stamp
 
         # Pubblica i dati verso la stazione di terra
@@ -209,7 +216,6 @@ class MissionExtInterface:
         tel_msg.longitudine = self.current_lon
         tel_msg.velocity = self.mean_vel
         self.pub_telemetry_data.publish(tel_msg)
-        self.pub_status.publish(usv_status)
 
     # ------------ CALCOLO SOG (Speed Over Ground) ------------
 
