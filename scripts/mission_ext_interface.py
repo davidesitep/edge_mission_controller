@@ -96,7 +96,7 @@ class MissionExtInterface:
             f'/drone{drone_id}/cmd_vel', Twist, self.cmd_vel_cc_callback
         )
         self.sub_remote_request = rospy.Subscriber(
-            f'/drone{drone_id}/get_cmd', Bool, self.control_required_callback
+            f'/drone{drone_id}/remote_control', Bool, self.control_required_callback
         )
         self.sub_mission_file = rospy.Subscriber(
             f'/drone{drone_id}/mission', String, self.mission_file_callback
