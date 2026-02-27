@@ -15,3 +15,4 @@ mission_test/
 README.md
 Dockerfile
 .dockerignore
+.env

@@ -15,7 +15,13 @@ echo " ROS_MASTER_URI : ${ROS_MASTER_URI:-http://localhost:11311}"
 echo " ROS_IP         : ${ROS_IP:-non impostato}"
 echo " ROS_HOSTNAME   : ${ROS_HOSTNAME:-non impostato}"
 echo " MISSION_DIR    : ${MISSION_DIR:-/home/usv/missions}"
+echo " DRONE_ID       : ${DRONE_ID:-1 (default)}"
 echo "========================================="
 
+# Costruisce gli argomenti roslaunch dalle env var
+LAUNCH_ARGS=""
+[ -n "$DRONE_ID" ]    && LAUNCH_ARGS="$LAUNCH_ARGS drone_id:=$DRONE_ID"
+[ -n "$MISSION_DIR" ] && LAUNCH_ARGS="$LAUNCH_ARGS mission_dir:=$MISSION_DIR"
+
 # Esegui il comando passato (default: roslaunch dal CMD del Dockerfile)
-exec "$@"
+exec "$@" $LAUNCH_ARGS
