@@ -452,11 +452,11 @@ class MissionExtInterface:
             try:
                 async with aio.insecure_channel(COMMANDVEL_ADDR) as channel:
                     stub = commandvel_pb2_grpc.CommandVelBridgeServiceStub(channel)
-                    request = commandvel_pb2.CommandRequest(drone_id=self._drone_id)
-                    async for cmd in stub.PullCommandVel(request):
+                    request = commandvel_pb2.Empty()
+                    async for cmd in stub.StreamCommandVels(request):
                         twist = Twist()
-                        twist.linear.x = cmd.vel
-                        twist.angular.z = cmd.rot
+                        twist.linear.x = cmd.linear_velocity
+                        twist.angular.z = cmd.angular_velocity
                         self.cc_cmd_vel = twist
                         if rospy.core.is_initialized():
                             self.last_cmd_vel_time = rospy.get_time()

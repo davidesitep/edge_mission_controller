@@ -34,19 +34,18 @@ class CommandVelBridgeServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.PullCommandVel = channel.unary_stream(
-                '/CommandVelBridge.CommandVelBridgeService/PullCommandVel',
-                request_serializer=commandvel__pb2.CommandRequest.SerializeToString,
-                response_deserializer=commandvel__pb2.CommandVel.FromString,
+        self.StreamCommandVels = channel.unary_stream(
+                '/CommandVelBridge.CommandVelBridgeService/StreamCommandVels',
+                request_serializer=commandvel__pb2.Empty.SerializeToString,
+                response_deserializer=commandvel__pb2.CommandVelCommand.FromString,
                 _registered_method=True)
 
 
 class CommandVelBridgeServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def PullCommandVel(self, request, context):
-        """ROS bridge pulls commands continuously
-        """
+    def StreamCommandVels(self, request, context):
+        """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -54,10 +53,10 @@ class CommandVelBridgeServiceServicer(object):
 
 def add_CommandVelBridgeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'PullCommandVel': grpc.unary_stream_rpc_method_handler(
-                    servicer.PullCommandVel,
-                    request_deserializer=commandvel__pb2.CommandRequest.FromString,
-                    response_serializer=commandvel__pb2.CommandVel.SerializeToString,
+            'StreamCommandVels': grpc.unary_stream_rpc_method_handler(
+                    servicer.StreamCommandVels,
+                    request_deserializer=commandvel__pb2.Empty.FromString,
+                    response_serializer=commandvel__pb2.CommandVelCommand.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -71,7 +70,7 @@ class CommandVelBridgeService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def PullCommandVel(request,
+    def StreamCommandVels(request,
             target,
             options=(),
             channel_credentials=None,
@@ -84,9 +83,9 @@ class CommandVelBridgeService(object):
         return grpc.experimental.unary_stream(
             request,
             target,
-            '/CommandVelBridge.CommandVelBridgeService/PullCommandVel',
-            commandvel__pb2.CommandRequest.SerializeToString,
-            commandvel__pb2.CommandVel.FromString,
+            '/CommandVelBridge.CommandVelBridgeService/StreamCommandVels',
+            commandvel__pb2.Empty.SerializeToString,
+            commandvel__pb2.CommandVelCommand.FromString,
             options,
             channel_credentials,
             insecure,

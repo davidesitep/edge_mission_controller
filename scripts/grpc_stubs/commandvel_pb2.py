@@ -24,17 +24,17 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x63ommandvel.proto\x12\x10\x43ommandVelBridge\"\"\n\x0e\x43ommandRequest\x12\x10\n\x08\x64rone_id\x18\x01 \x01(\r\"E\n\nCommandVel\x12\n\n\x02id\x18\x01 \x01(\r\x12\x0b\n\x03vel\x18\x02 \x01(\x02\x12\x0b\n\x03rot\x18\x03 \x01(\x02\x12\x11\n\ttimestamp\x18\x04 \x01(\x03\x32m\n\x17\x43ommandVelBridgeService\x12R\n\x0ePullCommandVel\x12 .CommandVelBridge.CommandRequest\x1a\x1c.CommandVelBridge.CommandVel0\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10\x63ommandvel.proto\x12\x10\x43ommandVelBridge\"\x07\n\x05\x45mpty\"e\n\x11\x43ommandVelCommand\x12\n\n\x02id\x18\x01 \x01(\x05\x12\x17\n\x0flinear_velocity\x18\x02 \x01(\x02\x12\x18\n\x10\x61ngular_velocity\x18\x03 \x01(\x02\x12\x11\n\ttimestamp\x18\x04 \x01(\x03\x32n\n\x17\x43ommandVelBridgeService\x12S\n\x11StreamCommandVels\x12\x17.CommandVelBridge.Empty\x1a#.CommandVelBridge.CommandVelCommand0\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'commandvel_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_COMMANDREQUEST']._serialized_start=38
-  _globals['_COMMANDREQUEST']._serialized_end=72
-  _globals['_COMMANDVEL']._serialized_start=74
-  _globals['_COMMANDVEL']._serialized_end=143
-  _globals['_COMMANDVELBRIDGESERVICE']._serialized_start=145
-  _globals['_COMMANDVELBRIDGESERVICE']._serialized_end=254
+  _globals['_EMPTY']._serialized_start=38
+  _globals['_EMPTY']._serialized_end=45
+  _globals['_COMMANDVELCOMMAND']._serialized_start=47
+  _globals['_COMMANDVELCOMMAND']._serialized_end=148
+  _globals['_COMMANDVELBRIDGESERVICE']._serialized_start=150
+  _globals['_COMMANDVELBRIDGESERVICE']._serialized_end=260
 # @@protoc_insertion_point(module_scope)

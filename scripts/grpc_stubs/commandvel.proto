@@ -17,18 +17,16 @@ syntax = "proto3";
 package CommandVelBridge;
 
 service CommandVelBridgeService {
-  // ROS bridge pulls commands continuously
-  rpc PullCommandVel(CommandRequest) returns (stream CommandVel);
+  rpc StreamCommandVels(Empty)
+      returns (stream CommandVelCommand);
 }
 
-message CommandRequest {
-  uint32 drone_id = 1;
-}
+message Empty {}
 
-message CommandVel {
-  uint32 id = 1;
-  float vel = 2;
-  float rot = 3;
+message CommandVelCommand {
+  int32 id = 1;
+  float linear_velocity = 2;
+  float angular_velocity = 3;
   int64 timestamp = 4;
 }
 
