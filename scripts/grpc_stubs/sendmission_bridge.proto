@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package SendMissionBridge;
+
+service SendMissionBridgeService {
+  rpc PullMissions(Empty) returns (stream MissionState);
+}
+
+message Empty {}
+
+message MissionState {
+  uint32 id = 1;
+  string mission_json = 2;
+  int64 timestamp = 3;
+}

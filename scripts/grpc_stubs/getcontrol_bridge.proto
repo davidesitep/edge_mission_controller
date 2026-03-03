@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package GetControlBridge;
+
+service GetControlBridgeService {
+  rpc PullControls(Empty) returns (stream ControlState);
+}
+
+message Empty {}
+
+message ControlState {
+  uint32 id = 1;
+  bool control_value = 2;
+  int64 timestamp = 3;
+}

@@ -7,29 +7,59 @@
 # Fornisce funzioni per il calcolo di SOG/COG, distanza dal goal, durata missione.
 # Autore: Davide Domeneghetti
 # Email: d.domenehetti@sitepitalia.it
-# Versione: 1.1
-# Data: 15/10/2025
-# Note: Questo script richiede la libreria 'gpxpy'. Installala tramite 'pip install gpxpy'.
+# Versione: 1.2
+# Data: 02/03/2026
+# Note: Questo script richiede 'gpxpy' e 'grpcio'. Installale tramite pip.
+# Nota gRPC: un unico thread di background gestisce tutti i canali (navdata push
+# + commandvel/getcontrol/sendmission pull) in un event loop asyncio condiviso.
+# Il main loop ROS non viene mai bloccato: pub_telemetry() aggiorna solo un dict.
 
 # TODO: aggiungere la lettura del topic della camera per lo streaming video.
 
+import asyncio
 import math
 import os
+import sys
+import threading
 import time
 from collections import deque
 
 import gpxpy
+import grpc.aio as aio
 import rospy
 from drone_msgs.msg import Telemetry
 from geometry_msgs.msg import Twist
 from sbg_driver.msg import SbgGpsPos
 from std_msgs.msg import Bool, Int32, String, Float32
 
+# Stub gRPC generati dai proto file (in scripts/grpc_stubs/)
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _SCRIPTS_DIR)
+sys.path.insert(0, os.path.join(_SCRIPTS_DIR, 'grpc_stubs'))
+from grpc_stubs import (
+    commandvel_pb2,
+    commandvel_pb2_grpc,
+    getcontrol_bridge_pb2,
+    getcontrol_bridge_pb2_grpc,
+    navdata_push_pb2,
+    navdata_push_pb2_grpc,
+    sendmission_bridge_pb2,
+    sendmission_bridge_pb2_grpc,
+)
+
 # --- Costanti (default, sovrascritte da parametri ROS) ---
 DEBUG = False
 MS_TO_KN = 1.9438  # Fattore di conversione m/s -> nodi (costante fisica)
 MEAN_SAMPLE = 5  # Numero di campioni per la media mobile
 USV_MEAN_VEL = 1.02  # m/s corrispondente a 2 kn
+
+# --- Indirizzi servizi gRPC (configurabili via variabili d'ambiente) ---
+NAVDATA_ADDR     = os.getenv("NAVDATA_SERVICE_ADDR",    "navdata_service:60001")
+COMMANDVEL_ADDR  = os.getenv("COMMANDVEL_SERVICE_ADDR", "commandvel_service:60005")
+GETCONTROL_ADDR  = os.getenv("GETCONTROL_SERVICE_ADDR", "getcontrol_service:60004")
+SENDMISSION_ADDR = os.getenv("SENDMISSION_SERVICE_ADDR", "sendmission_service:60008")
+GRPC_RETRY_DELAY = 2.0   # secondi prima di ritentare la connessione
+NAVDATA_RATE     = 0.05  # secondi tra un campione e l'altro (20 Hz)
 
 
 class SlidingWindow:
@@ -74,6 +104,7 @@ class MissionExtInterface:
             '/mission_ext_interface/usv_mean_vel', USV_MEAN_VEL
         )
 
+        self._drone_id = drone_id
         self.mission_file_path = mission_file_path
         self.prev_stamp = time.time()
         self.prev_pos = None
@@ -116,6 +147,17 @@ class MissionExtInterface:
         )
         # Pubblica drone_id una volta (latch mantiene il messaggio per nuovi subscriber)
         self.pub_drone_id.publish(Int32(data=drone_id))
+
+        # --- gRPC: stato condiviso e unico thread di background ---
+        # pub_telemetry() scrive qui; il thread gRPC legge e streamma a 20 Hz.
+        self._grpc_state = {
+            "lat": 0.0, "lon": 0.0, "hdg": 0.0, "vel": 0.0, "status": 0
+        }
+        self._grpc_lock = threading.Lock()
+        self._grpc_stop = threading.Event()
+        threading.Thread(
+            target=self._grpc_worker, daemon=True, name="grpc"
+        ).start()
 
     # ------------ CALLBACK ------------
 
@@ -208,7 +250,17 @@ class MissionExtInterface:
 
         self.prev_stamp = now_stamp
 
-        # Pubblica i dati verso la stazione di terra
+        # Aggiorna stato condiviso per il thread gRPC (~1 µs, non blocca)
+        with self._grpc_lock:
+            self._grpc_state.update({
+                "lat": self.current_lat,
+                "lon": self.current_lon,
+                "hdg": self.mean_hdg,
+                "vel": self.mean_vel,
+                "status": usv_status,
+            })
+
+        # Pubblica i dati verso la stazione di terra (topic ROS, Option B)
         tel_msg = Telemetry()
         tel_msg.header.stamp = rospy.Time.now()
         tel_msg.heading = self.mean_hdg
@@ -346,3 +398,105 @@ class MissionExtInterface:
             )
 
         return math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+
+    # ------------ gRPC: thread e canali ------------
+
+    def _grpc_worker(self):
+        """Entry point del thread gRPC. Avvia l'event loop asyncio."""
+        asyncio.run(self._grpc_event_loop())
+
+    async def _grpc_event_loop(self):
+        """Event loop principale: tutti i canali gRPC in parallelo."""
+        await asyncio.gather(
+            self._push_navdata(),
+            self._pull_commandvel(),
+            self._pull_getcontrol(),
+            self._pull_sendmission(),
+            return_exceptions=True,
+        )
+
+    # -- Push navdata (telemetria + stato verso GCS) --
+
+    async def _push_navdata(self):
+        """Apre lo stream navdata verso la GCS e lo mantiene attivo."""
+        while not self._grpc_stop.is_set():
+            try:
+                async with aio.insecure_channel(NAVDATA_ADDR) as channel:
+                    stub = navdata_push_pb2_grpc.NavdataPushServiceStub(channel)
+                    await stub.PushNavdataStream(self._navdata_generator())
+            except Exception as e:
+                rospy.logwarn(f"[gRPC] navdata disconnesso: {e}")
+                await asyncio.sleep(GRPC_RETRY_DELAY)
+
+    async def _navdata_generator(self):
+        """Generator asincrono: produce un NavdataMsg ogni NAVDATA_RATE secondi."""
+        while not self._grpc_stop.is_set():
+            await asyncio.sleep(NAVDATA_RATE)
+            with self._grpc_lock:
+                s = dict(self._grpc_state)
+            yield navdata_push_pb2.NavdataMsg(
+                id=self._drone_id,
+                lat=s["lat"],
+                lon=s["lon"],
+                hdg=s["hdg"],
+                vel=s["vel"],
+                status=float(s["status"]),
+                timestamp=int(time.time() * 1000),
+            )
+
+    # -- Pull command vel (comandi velocita' dalla GCS) --
+
+    async def _pull_commandvel(self):
+        """Riceve comandi di velocita' dalla GCS e aggiorna cc_cmd_vel."""
+        while not self._grpc_stop.is_set():
+            try:
+                async with aio.insecure_channel(COMMANDVEL_ADDR) as channel:
+                    stub = commandvel_pb2_grpc.CommandVelBridgeServiceStub(channel)
+                    request = commandvel_pb2.CommandRequest(drone_id=self._drone_id)
+                    async for cmd in stub.PullCommandVel(request):
+                        twist = Twist()
+                        twist.linear.x = cmd.vel
+                        twist.angular.z = cmd.rot
+                        self.cc_cmd_vel = twist
+                        if rospy.core.is_initialized():
+                            self.last_cmd_vel_time = rospy.get_time()
+            except Exception as e:
+                rospy.logwarn(f"[gRPC] commandvel disconnesso: {e}")
+                await asyncio.sleep(GRPC_RETRY_DELAY)
+
+    # -- Pull getcontrol (richiesta controllo remoto dalla GCS) --
+
+    async def _pull_getcontrol(self):
+        """Riceve lo stato di controllo remoto dalla GCS."""
+        while not self._grpc_stop.is_set():
+            try:
+                async with aio.insecure_channel(GETCONTROL_ADDR) as channel:
+                    stub = getcontrol_bridge_pb2_grpc.GetControlBridgeServiceStub(channel)
+                    request = getcontrol_bridge_pb2.Empty()
+                    async for ctrl in stub.PullControls(request):
+                        if ctrl.id == self._drone_id:
+                            self.is_remote_control = ctrl.control_value
+            except Exception as e:
+                rospy.logwarn(f"[gRPC] getcontrol disconnesso: {e}")
+                await asyncio.sleep(GRPC_RETRY_DELAY)
+
+    # -- Pull sendmission (file di missione GPX dalla GCS) --
+
+    async def _pull_sendmission(self):
+        """Riceve file di missione dalla GCS e li inoltra al callback esistente."""
+        while not self._grpc_stop.is_set():
+            try:
+                async with aio.insecure_channel(SENDMISSION_ADDR) as channel:
+                    stub = sendmission_bridge_pb2_grpc.SendMissionBridgeServiceStub(channel)
+                    request = sendmission_bridge_pb2.Empty()
+                    async for mission in stub.PullMissions(request):
+                        if mission.id == self._drone_id:
+                            # Riusa il callback esistente passando un messaggio ROS fittizio
+                            self.mission_file_callback(String(data=mission.mission_json))
+            except Exception as e:
+                rospy.logwarn(f"[gRPC] sendmission disconnesso: {e}")
+                await asyncio.sleep(GRPC_RETRY_DELAY)
+
+    def shutdown(self):
+        """Ferma il thread gRPC in modo pulito (opzionale, il thread e' daemon)."""
+        self._grpc_stop.set()

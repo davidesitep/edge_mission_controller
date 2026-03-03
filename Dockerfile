@@ -33,7 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install --no-cache-dir \
     gpxpy \
     psutil \
-    utm
+    utm \
+    grpcio \
+    grpcio-status
 
 # ---------- Workspace catkin ----------
 ENV CATKIN_WS=/catkin_ws

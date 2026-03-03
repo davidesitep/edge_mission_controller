@@ -14,6 +14,14 @@
     <!-- Modalita' debug (log verbosi) -->
     <arg name="debug" default="false"/>
 
+    <!-- === Indirizzi servizi gRPC (GCS) === -->
+    <!-- Formato: host:porta. Con network_mode:host usare IP reale o hostname della GCS. -->
+    <!-- Se la variabile d'ambiente e' gia' impostata nel container, viene usata come default. -->
+    <arg name="navdata_service_addr"     default="$(optenv NAVDATA_SERVICE_ADDR     navdata_service:60001)"/>
+    <arg name="commandvel_service_addr"  default="$(optenv COMMANDVEL_SERVICE_ADDR  commandvel_service:60005)"/>
+    <arg name="getcontrol_service_addr"  default="$(optenv GETCONTROL_SERVICE_ADDR  getcontrol_service:60004)"/>
+    <arg name="sendmission_service_addr" default="$(optenv SENDMISSION_SERVICE_ADDR sendmission_service:60008)"/>
+
     <!-- Conversione coordinate: true = waypoint GPX in lat/lon (richiede navsat_transform_node) -->
     <!--                         false = waypoint gia' in frame map (per test) -->
     <arg name="use_gps_waypoints" default="false"/>
@@ -52,6 +60,11 @@
         <param name="frame_base" value="$(arg frame_base)"/>
         <env name="ROSCONSOLE_CONFIG_FILE"
              value="$(find edge_mission_controller)/config/rosconsole.config"/>
+        <!-- Indirizzi gRPC propagati come variabili d'ambiente al processo Python -->
+        <env name="NAVDATA_SERVICE_ADDR"     value="$(arg navdata_service_addr)"/>
+        <env name="COMMANDVEL_SERVICE_ADDR"  value="$(arg commandvel_service_addr)"/>
+        <env name="GETCONTROL_SERVICE_ADDR"  value="$(arg getcontrol_service_addr)"/>
+        <env name="SENDMISSION_SERVICE_ADDR" value="$(arg sendmission_service_addr)"/>
     </node>
 
     <!-- Watchdog (monitora heartbeat mission_controller) -->
