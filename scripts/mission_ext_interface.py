@@ -20,7 +20,7 @@ from collections import deque
 
 import gpxpy
 import rospy
-from drone_msgs.msg import Telemetry
+from drone_msgs.msg import Telemetry, FLOUR, MPB
 from geometry_msgs.msg import Twist
 from sbg_driver.msg import SbgGpsPos
 from std_msgs.msg import Bool, Int32, String, Float32
@@ -104,6 +104,12 @@ class MissionExtInterface:
         self.sub_gps_pos = rospy.Subscriber(
             '/sbg/gps_pos', SbgGpsPos, self.gps_pos_callback
         )
+        self.sub_flour = rospy.Subscriber(
+            '/FLOUR', FLOUR, self.flour_callback
+        )
+        self.sub_mpb = rospy.Subscriber(
+            '/MPB', MPB, self.mpb_callback
+        )
 
         # Publishers telemetria
         self.pub_telemetry_data = rospy.Publisher(
@@ -116,6 +122,12 @@ class MissionExtInterface:
         )
         # Pubblica drone_id una volta (latch mantiene il messaggio per nuovi subscriber)
         self.pub_drone_id.publish(Int32(data=drone_id))
+        self.pub_flour = rospy.Publisher(
+            f'/drone{drone_id}/FLOUR', FLOUR, queue_size=10
+        )
+        self.pub_mpb = rospy.Publisher(
+            f'/drone{drone_id}/MPB', MPB, queue_size=10
+        )
 
     # ------------ CALLBACK ------------
 
@@ -172,6 +184,14 @@ class MissionExtInterface:
         """
         self.current_lat = msg.latitude
         self.current_lon = msg.longitude
+
+    def flour_callback(self, msg):
+        """Riceve i dati del sensore FLOUR e li ripubblica con prefisso drone_id."""
+        self.pub_flour.publish(msg)
+
+    def mpb_callback(self, msg):
+        """Riceve i dati del sensore MPB e li ripubblica con prefisso drone_id."""
+        self.pub_mpb.publish(msg)
 
     # ------------ TELEMETRIA ------------
 

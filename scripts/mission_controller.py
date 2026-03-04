@@ -179,6 +179,12 @@ class MissionController:
         self.prev_stamp = time.time()
         self.durata_missione = 0.0
 
+        # Metriche missione
+        self._total_route_distance = 0.0   # Lunghezza pianificata (somma segmenti euclidei)
+        self._distance_accumulated = 0.0   # Distanza percorsa (integrazione pose in stato 2)
+        self._last_pos_for_distance = None # Ultima pose usata per l'integrazione
+        self._mission_start_time = None    # Timestamp inizio missione (stato 1->2)
+
         # Variabili di stato
         self.is_valid_mission = False
         self.is_remote_control = False
@@ -631,25 +637,21 @@ class MissionController:
 
         Se la missione e' completata o fallita, elimina il file GPX da mission_todo/.
         """
-        pose = self.get_usv_pose()
-        if pose and self.waypoints:
-            dist_to_start = math.sqrt(
-                (pose[0] - self.waypoints[0][0]) ** 2
-                + (pose[1] - self.waypoints[0][1]) ** 2
-            )
+        if self._mission_start_time is not None and mission_status != "iniziata":
+            mission_duration = (
+                rospy.Time.now() - self._mission_start_time
+            ).to_sec()
         else:
-            dist_to_start = 0.0
-
-        lunghezza_totale = sum(self.lunghezza_segmenti) + dist_to_start
+            mission_duration = 0.0
 
         mission = MissionInfo(
             mission_id=self.new_mission_id,
             mission_status=mission_status,
             total_waypoints=len(self.waypoints) if self.waypoints else 0,
             waypoint_reached=self.waypoints_reached,
-            total_distance=lunghezza_totale,
-            distance_traveled=0.0,
-            mission_duration=0.0  # TODO: implementare durata
+            total_distance=self._total_route_distance,
+            distance_traveled=self._distance_accumulated,
+            mission_duration=mission_duration
         )
 
         # Controlla se la missione e' gia' presente
@@ -730,6 +732,9 @@ class MissionController:
         Returns:
             Tupla (x, y, yaw) oppure None se la TF non e' disponibile.
         """
+        # TODO: 'map' e 'base_link' sono hardcodati - sostituire con FRAME_ID_MAP
+        # e FRAME_ID_BASE affinche' il parametro frame_map del launch file
+        # (da cambiare in "odom" per il TF tree reale) venga rispettato.
         try:
             trans = self.tf_buffer.lookup_transform(
                 'map', 'base_link', rospy.Time(0)
@@ -1035,6 +1040,27 @@ class MissionController:
         )
         return lunghezza_totale
 
+    def _compute_route_length(self):
+        """Calcola la lunghezza pianificata del percorso come somma delle distanze
+        euclidee tra waypoint consecutivi (in metri, frame odom/map).
+
+        Chiamato all'ingresso in stato 2, dopo _convert_all_waypoints_to_map(),
+        quando self.waypoints contiene coordinate metriche.
+        Il risultato viene salvato in self._total_route_distance.
+        """
+        if not self.waypoints or len(self.waypoints) < 2:
+            self._total_route_distance = 0.0
+            return
+
+        total = 0.0
+        for i in range(len(self.waypoints) - 1):
+            x1, y1 = self.waypoints[i][0], self.waypoints[i][1]
+            x2, y2 = self.waypoints[i + 1][0], self.waypoints[i + 1][1]
+            total += math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+        self._total_route_distance = total
+        rospy.loginfo(f"Lunghezza percorso pianificato: {total:.2f} m")
+
     # ------------ GESTIONE ERRORI ------------
 
     def handle_error(self, error_type, error_msg):
@@ -1074,6 +1100,15 @@ class MissionController:
             pose = self.get_usv_pose()
             if pose:
                 self.current_position = pose[:2]
+
+            # Accumulo distanza percorsa (solo in stato 2 - navigazione autonoma)
+            if self.usv_status == MAPPA_DEGLI_STATI_USV[2] and self.current_position:
+                if self._last_pos_for_distance is not None:
+                    dx = self.current_position[0] - self._last_pos_for_distance[0]
+                    dy = self.current_position[1] - self._last_pos_for_distance[1]
+                    self._distance_accumulated += math.sqrt(dx ** 2 + dy ** 2)
+                self._last_pos_for_distance = self.current_position
+
             self.gnd_station_if.pub_telemetry(
                 self.usv_status, self.current_position
             )
@@ -1273,6 +1308,11 @@ class MissionController:
                 self.pub_status.publish(1)
                 return
 
+            # Calcola lunghezza percorso e inizializza metriche missione
+            self._compute_route_length()
+            self._distance_accumulated = 0.0
+            self._last_pos_for_distance = None
+            self._mission_start_time = rospy.Time.now()
             self.save_mission_info("iniziata")
             self.jump_to_state(2)
             self.pub_status.publish(1)
@@ -1854,6 +1894,13 @@ class MissionController:
                         self.jump_to_state(1)
                         self.pub_status.publish(7)
                         return
+
+        if self.major_error:
+            rospy.logerr("Guasto motore rilevato in attesa comando remoto: passaggio a errore critico.")
+            self.pub_vel_cmd.publish(Twist())
+            self.jump_to_state(5)
+            self.pub_status.publish(7)
+            return
 
         # Operatore rimuove is_remote_control -> torna in idle
         if not self.is_remote_control:
