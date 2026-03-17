@@ -207,6 +207,12 @@ class MissionController:
         # --- Lettura parametri ROS (sovrascrivono i default a livello modulo) ---
         self._load_ros_params()
 
+        # Modalità relay: NO_FSM=1 disabilita la FSM, il nodo funziona come puro relay
+        self.no_fsm = os.environ.get('NO_FSM', '0') != '0'
+        if self.no_fsm:
+            self.usv_status = MAPPA_DEGLI_STATI_USV[3]
+            rospy.logwarn("Modalità NO_FSM attiva: FSM disabilitata, relay puro.")
+
         # TF (richiede nodo ROS inizializzato)
         self.tf_buffer = tf2_ros.Buffer()
 
@@ -475,30 +481,6 @@ class MissionController:
                 self.errori_minori.append("motore fuori uso")
             rospy.logerr("Rilevato guasto motore!")
 
-    # ------------ MULTIPLEXER VELOCITA' ------------
-
-    def vel_multiplexer(self):
-        """Seleziona il comando di velocita' in base allo stato corrente.
-
-        Stato 0, 1      -> Twist() zero (idle / avvio, nessun movimento)
-        Stato 2, 6      -> move_base/cmd_vel (navigazione autonoma e docking)
-        Stato 3, 7      -> CC/cmd_vel (controllo remoto GCS)
-        Stato 4, 5      -> mc_cmd_vel (inibizione diretta dal mission controller)
-
-        Nota: per gli stati 2, 3 e 6 il relay ad alta frequenza avviene
-        direttamente nei rispettivi callback; questo metodo viene usato
-        dagli handler degli stati 4/5 e come riferimento della logica.
-        """
-        if self.usv_status in (MAPPA_DEGLI_STATI_USV[2], MAPPA_DEGLI_STATI_USV[6]):
-            return self.move_base_cmd_vel
-        elif self.usv_status in (
-            MAPPA_DEGLI_STATI_USV[3], MAPPA_DEGLI_STATI_USV[7]
-        ):
-            return self.cc_cmd_vel
-        elif self.usv_status in (MAPPA_DEGLI_STATI_USV[4], MAPPA_DEGLI_STATI_USV[5]):
-            return self.mc_cmd_vel
-        else:
-            return Twist()
 
     # ------------ GESTIONE MISSIONI (FILE GPX) ------------
 
@@ -732,12 +714,9 @@ class MissionController:
         Returns:
             Tupla (x, y, yaw) oppure None se la TF non e' disponibile.
         """
-        # TODO: 'map' e 'base_link' sono hardcodati - sostituire con FRAME_ID_MAP
-        # e FRAME_ID_BASE affinche' il parametro frame_map del launch file
-        # (da cambiare in "odom" per il TF tree reale) venga rispettato.
         try:
             trans = self.tf_buffer.lookup_transform(
-                'map', 'base_link', rospy.Time(0)
+                FRAME_ID_MAP, FRAME_BASE_ID, rospy.Time(0)
             )
             x = trans.transform.translation.x
             y = trans.transform.translation.y
@@ -1088,13 +1067,20 @@ class MissionController:
             old_status = self.usv_status
             self.can_jump = False
 
-            # Diagnostica
-            self.usv_diagnostic.get_usv_status()
-            self.check_system_status()
-            self.minor_error = self.sensor_error or self.planner_error
+            # Heartbeat (sempre, anche in modalità NO_FSM)
+            self.heartbeat.publish(Header(stamp=rospy.Time.now()))
 
-            # Macchina a stati
-            self.state_machine()
+            if not self.no_fsm:
+                # Diagnostica
+                self.usv_diagnostic.get_usv_status()
+                self.check_system_status()
+                self.minor_error = self.sensor_error or self.planner_error
+
+                # Macchina a stati
+                self.state_machine()
+            else:
+                # Relay puro: pubblica stato fisso 3 (controllo remoto)
+                self.pub_status.publish(3)
 
             # Telemetria
             pose = self.get_usv_pose()
@@ -1141,8 +1127,6 @@ class MissionController:
 
     def state_machine(self):
         """Dispatcher della macchina a stati."""
-        self.heartbeat.publish(Header(stamp=rospy.Time.now()))
-
         if self.usv_status == MAPPA_DEGLI_STATI_USV[0]:
             self._handle_state_idle()
         elif self.usv_status == MAPPA_DEGLI_STATI_USV[1]:

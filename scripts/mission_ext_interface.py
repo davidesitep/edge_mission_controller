@@ -22,7 +22,7 @@ import gpxpy
 import rospy
 from drone_msgs.msg import Telemetry, FLOUR, MPB
 from geometry_msgs.msg import Twist
-from sbg_driver.msg import SbgGpsPos
+from sbg_driver.msg import SbgGpsPos, SbgEkfEuler, SbgGpsVel
 from std_msgs.msg import Bool, Int32, String, Float32
 
 # --- Costanti (default, sovrascritte da parametri ROS) ---
@@ -30,6 +30,7 @@ DEBUG = False
 MS_TO_KN = 1.9438  # Fattore di conversione m/s -> nodi (costante fisica)
 MEAN_SAMPLE = 5  # Numero di campioni per la media mobile
 USV_MEAN_VEL = 1.02  # m/s corrispondente a 2 kn
+SBG_TIMEOUT = 2.0  # Secondi: soglia per considerare dati SBG "freschi"
 
 
 class SlidingWindow:
@@ -66,12 +67,15 @@ class MissionExtInterface:
 
     def __init__(self, mission_file_path, drone_id):
         # Lettura parametri dal YAML (namespace assoluto, classe non standalone)
-        global MEAN_SAMPLE, USV_MEAN_VEL
+        global MEAN_SAMPLE, USV_MEAN_VEL, SBG_TIMEOUT
         MEAN_SAMPLE = rospy.get_param(
             '/mission_ext_interface/mean_sample', MEAN_SAMPLE
         )
         USV_MEAN_VEL = rospy.get_param(
             '/mission_ext_interface/usv_mean_vel', USV_MEAN_VEL
+        )
+        SBG_TIMEOUT = rospy.get_param(
+            '/mission_ext_interface/sbg_timeout', SBG_TIMEOUT
         )
 
         self.mission_file_path = mission_file_path
@@ -104,12 +108,28 @@ class MissionExtInterface:
         self.sub_gps_pos = rospy.Subscriber(
             '/sbg/gps_pos', SbgGpsPos, self.gps_pos_callback
         )
+        self.sub_ekf_euler = rospy.Subscriber(
+            '/sbg/ekf_euler', SbgEkfEuler, self.ekf_euler_callback
+        )
+        self.sub_gps_vel = rospy.Subscriber(
+            '/sbg/gps_vel', SbgGpsVel, self.gps_vel_callback
+        )
         self.sub_flour = rospy.Subscriber(
             '/FLOUR', FLOUR, self.flour_callback
         )
         self.sub_mpb = rospy.Subscriber(
             '/MPB', MPB, self.mpb_callback
         )
+
+        # Attributi sorgente SBG (heading e velocita')
+        self.sbg_hdg = None          # Heading EKF in gradi [0, 360)
+        self.sbg_hdg_stamp = None    # Timestamp ultimo dato heading SBG
+        self.sbg_hdg_valid = False   # True se EKF heading valido
+        self.sbg_vel = None          # Velocita' GPS in m/s
+        self.sbg_vel_stamp = None    # Timestamp ultimo dato velocita' SBG
+        self.sbg_vel_valid = False   # True se velocita' GPS valida
+        self._hdg_source = "calc"    # Sorgente attiva: "sbg" o "calc"
+        self._vel_source = "calc"    # Sorgente attiva: "sbg" o "calc"
 
         # Publishers telemetria
         self.pub_telemetry_data = rospy.Publisher(
@@ -185,6 +205,31 @@ class MissionExtInterface:
         self.current_lat = msg.latitude
         self.current_lon = msg.longitude
 
+    def ekf_euler_callback(self, msg):
+        """Riceve l'heading dal filtro EKF SBG Ellipse.
+
+        Converte il valore in gradi e verifica la validita' della soluzione.
+        Usato come sorgente primaria per il COG nella telemetria.
+        """
+        self.sbg_hdg_valid = msg.status.heading_valid
+        if self.sbg_hdg_valid:
+            hdg_deg = math.degrees(msg.angle.z) % 360
+            self.sbg_hdg = hdg_deg
+        self.sbg_hdg_stamp = time.time()
+
+    def gps_vel_callback(self, msg):
+        """Riceve la velocita' GPS dal sensore SBG Ellipse.
+
+        Considera valida solo la soluzione Doppler o differenziale.
+        Usata come sorgente primaria per il SOG nella telemetria.
+        """
+        self.sbg_vel_valid = msg.status.vel_type in (2, 4)
+        if self.sbg_vel_valid:
+            self.sbg_vel = math.sqrt(
+                msg.velocity.x ** 2 + msg.velocity.y ** 2
+            )
+        self.sbg_vel_stamp = time.time()
+
     def flour_callback(self, msg):
         """Riceve i dati del sensore FLOUR e li ripubblica con prefisso drone_id."""
         self.pub_flour.publish(msg)
@@ -228,13 +273,41 @@ class MissionExtInterface:
 
         self.prev_stamp = now_stamp
 
+        # Determina la sorgente migliore per la velocità
+        if (self._sbg_data_fresh(self.sbg_vel_stamp)
+                and self.sbg_vel_valid
+                and self.sbg_vel is not None):
+            vel_to_pub = self.sbg_vel
+            if self._vel_source != "sbg":
+                rospy.loginfo("[telemetria] Velocita': attiva sorgente SBG")
+                self._vel_source = "sbg"
+        else:
+            vel_to_pub = self.mean_vel
+            if self._vel_source != "calc":
+                rospy.logwarn("[telemetria] Velocita': fallback a calcolo posizionale")
+                self._vel_source = "calc"
+
+        # Determina la sorgente migliore per l'heading
+        if (self._sbg_data_fresh(self.sbg_hdg_stamp)
+                and self.sbg_hdg_valid
+                and self.sbg_hdg is not None):
+            hdg_to_pub = self.sbg_hdg
+            if self._hdg_source != "sbg":
+                rospy.loginfo("[telemetria] Heading: attiva sorgente SBG EKF")
+                self._hdg_source = "sbg"
+        else:
+            hdg_to_pub = self.mean_hdg
+            if self._hdg_source != "calc":
+                rospy.logwarn("[telemetria] Heading: fallback a calcolo posizionale")
+                self._hdg_source = "calc"
+
         # Pubblica i dati verso la stazione di terra
         tel_msg = Telemetry()
         tel_msg.header.stamp = rospy.Time.now()
-        tel_msg.heading = self.mean_hdg
+        tel_msg.heading = hdg_to_pub
         tel_msg.latitudine = self.current_lat
         tel_msg.longitudine = self.current_lon
-        tel_msg.velocity = self.mean_vel
+        tel_msg.velocity = vel_to_pub
         self.pub_telemetry_data.publish(tel_msg)
 
     # ------------ CALCOLO SOG (Speed Over Ground) ------------
@@ -347,6 +420,10 @@ class MissionExtInterface:
             self.time_to_wp = self.distance_to_goal / self.mean_vel
 
     # ------------ UTILITA' ------------
+
+    def _sbg_data_fresh(self, stamp):
+        """True se il dato SBG è stato ricevuto entro SBG_TIMEOUT secondi."""
+        return stamp is not None and (time.time() - stamp) < SBG_TIMEOUT
 
     @staticmethod
     def dist(point1, point2):
