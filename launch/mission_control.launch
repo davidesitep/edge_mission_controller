@@ -15,17 +15,36 @@
     <arg name="debug" default="false"/>
 
     <!-- Conversione coordinate: true = waypoint GPX in lat/lon (richiede navsat_transform_node) -->
-    <!--                         false = waypoint gia' in frame map (per test) -->
-    <arg name="use_gps_waypoints" default="false"/>
+    <!--                         false = waypoint gia' in frame map (test locali)               -->
+    <!-- Selezionabile via variabile d'ambiente nel .env:                                       -->
+    <!--   USE_GPS_WAYPOINTS=true   (produzione, waypoint GPX reali in lat/lon → frame odom)    -->
+    <!--   USE_GPS_WAYPOINTS=false  (default, test con coordinate map dirette)                  -->
+    <!-- NOTA: FRAME_ID_MAP viene derivato automaticamente in _load_ros_params():               -->
+    <!--       true → 'odom' (TF tree reale) | false → 'map' (test)                            -->
+    <arg name="use_gps_waypoints" default="$(optenv USE_GPS_WAYPOINTS false)"/>
 
     <!-- Coordinate docking (formato dipende da use_gps_waypoints) -->
     <arg name="docking_target_x" default="0.0"/>
     <arg name="docking_target_y" default="0.0"/>
 
     <!-- Frame di riferimento -->
-    <arg name="frame_map" default="map"/>
+    <!-- frame_map non e' piu' un parametro indipendente: viene derivato     -->
+    <!-- automaticamente da use_gps_waypoints in mission_controller.py       -->
     <arg name="frame_utm" default="utm"/>
     <arg name="frame_base" default="base_link"/>
+
+    <!-- Datum GPS fisso — DEVE essere configurato nel launch file di navsat_transform_node,
+         NON qui. navsat_transform_node legge ~datum una sola volta all'avvio: se e' gia'
+         in esecuzione quando parte questo launch, qualsiasi parametro impostato qui
+         arriva troppo tardi.
+
+         Nel launch file del robot base, nella sezione <node> di navsat_transform_node:
+             <param name="datum" type="yaml" value="[datum_lat, datum_lon, 0.0]"/>
+         Esempio porto:
+             <param name="datum" type="yaml" value="[45.4408, 12.3155, 0.0]"/>
+
+         Se non impostato, navsat_transform_node usa il primo fix GPS come origine
+         (l'origine di odom cambia ad ogni riavvio del sistema).              -->
 
     <!-- === Caricamento parametri di tuning da YAML === -->
     <!-- I parametri vengono caricati nei namespace dei nodi corrispondenti -->
@@ -47,11 +66,11 @@
         <param name="use_gps_waypoints" type="bool" value="$(arg use_gps_waypoints)"/>
         <param name="docking_target_x" type="double" value="$(arg docking_target_x)"/>
         <param name="docking_target_y" type="double" value="$(arg docking_target_y)"/>
-        <param name="frame_map" value="$(arg frame_map)"/>
         <param name="frame_utm" value="$(arg frame_utm)"/>
         <param name="frame_base" value="$(arg frame_base)"/>
         <env name="ROSCONSOLE_CONFIG_FILE"
              value="$(find edge_mission_controller)/config/rosconsole.config"/>
+        <env name="NO_FSM" value="$(optenv NO_FSM 0)"/>
     </node>
 
     <!-- Watchdog (monitora heartbeat mission_controller) -->

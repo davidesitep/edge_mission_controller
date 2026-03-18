@@ -307,7 +307,10 @@ class MissionController:
         dock_y = rospy.get_param('~docking_target_y', DOCKING_TARGET[1])
         DOCKING_TARGET = (dock_x, dock_y)
 
-        FRAME_ID_MAP = rospy.get_param('~frame_map', FRAME_ID_MAP)
+        # FRAME_ID_MAP viene derivato automaticamente da USE_GPS_WAYPOINTS:
+        #   True  (produzione, waypoint GPX reali) → 'odom' (root del TF tree reale)
+        #   False (test, coordinate gia' in frame) → 'map'
+        FRAME_ID_MAP = 'odom' if USE_GPS_WAYPOINTS else 'map'
         FRAME_ID_UTM = rospy.get_param('~frame_utm', FRAME_ID_UTM)
         FRAME_BASE_ID = rospy.get_param('~frame_base', FRAME_BASE_ID)
 
